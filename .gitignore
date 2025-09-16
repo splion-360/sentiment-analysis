@@ -209,3 +209,12 @@ __marimo__/
 # PDF and DOCS
 **/*.pdf
 **/*.docx
+
+# Data 
+**/*.zip
+**/*.csv
+
+# Project files 
+**/.vscode 
+**/CLAUDE.md
+**/wandb
