@@ -17,7 +17,6 @@ repos:
         name: pytest
         entry: pytest
         language: system
-        args: [-s]
-        files: ^backend/tests/.*\.py$
+        args: ["-q", "backend/tests/"]
         pass_filenames: false
         stages: [push]
