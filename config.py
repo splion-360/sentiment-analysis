@@ -1,5 +1,9 @@
 import logging
+import os
+import random
 
+import numpy as np
+import torch
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,25 +16,35 @@ TRAIN_FILE = 'training.1600000.processed.noemoticon.csv'
 TEST_FILE = 'testdata.manual.2009.06.14.csv'
 MAX_VOCAB_SIZE = 30000
 MIN_FREQ = 2
-MAX_LENGTH = 128
+MAX_LENGTH = 40
 USE_STEMMING = True
-TOKENIZER = "tweet"
+SEED = 43
 
-# Model Config
-EMBEDDING_DIM = 96
-NUM_HEADS = 2
-FF_PROJECTION_DIM = 128
-NUM_CLASSES = 2
-DROPOUT = 0.1
+
+# TRANSFORMER
+class TransformerConfig:
+    EMBEDDING_DIM = 128
+    NUM_HEADS = 4
+    FF_PROJECTION_DIM = 512
+    NUM_CLASSES = 2
+    DROPOUT = 0.1
+    LAYERS = 3
+
 
 # Training Config
 LEARNING_RATE = 1e-4
-BATCH_SIZE = 32
+BATCH_SIZE = 128
 NUM_EPOCHS = 10
-TRAIN_SPLIT = 0.8
-DEVICE = "cuda"
+TRAIN_SPLIT = 0.99
+DEVICE = torch.device(f'cuda:{0}' if torch.cuda.is_available() else 'cpu')
 WANDB_PROJECT = "sentiment-analysis"
-NUM_WORKERS = 32
+NUM_WORKERS = 16
+LOG_INTERVAL = 1000
+
+# App Configs
+MODEL_NAME = "transformer"
+MODEL_PATH = "training/weights/transformer/7.pth"
+TOKENIZER = "tweet"
 
 
 class ColoredFormatter(logging.Formatter):
@@ -97,6 +111,19 @@ def setup_logger(name: str = __name__, text_color: str = None) -> logging.Logger
         logger.addHandler(console_handler)
 
     return logger
+
+
+def set_seed(seed: int = SEED):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+    os.environ['PYTHONHASHSEED'] = str(seed)
 
 
 logger = setup_logger()

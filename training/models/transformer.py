@@ -4,47 +4,48 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from config import DROPOUT, EMBEDDING_DIM, FF_PROJECTION_DIM, MAX_LENGTH, NUM_CLASSES, NUM_HEADS
+from config import MAX_LENGTH, TransformerConfig
 
 
 class PositionalEncoding(nn.Module):
 
-    def __init__(self, d_model, max_len=5000):
+    def __init__(self, d_embed: int, max_len: int, dropout: float):
         super().__init__()
 
-        pe = torch.zeros(max_len, d_model)
+        self.dropout = nn.Dropout(dropout)
+        pe = torch.zeros(max_len, d_embed)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        div_term = torch.exp(torch.arange(0, d_embed, 2).float() * (-math.log(10000.0) / d_embed))
 
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
-        pe = pe.unsqueeze(0).transpose(0, 1)
-
-        self.register_buffer('pe', pe)
+        self.register_buffer("pe", pe.unsqueeze(0), persistent=False)
 
     def forward(self, x):
-        return x + self.pe[: x.size(0), :]
+        L = x.shape[1]
+        x = x + self.pe[:, :L, :]
+        return self.dropout(x)
 
 
 class MultiHeadAttention(nn.Module):
 
-    def __init__(self, d_model, num_heads):
+    def __init__(self, d_embed, num_heads):
         super().__init__()
-        self.d_model = d_model
+        self.d_embed = d_embed
         self.num_heads = num_heads
-        self.head_dim = d_model // num_heads
+        self.head_dim = d_embed // num_heads
 
-        self.q_linear = nn.Linear(d_model, d_model)
-        self.k_linear = nn.Linear(d_model, d_model)
-        self.v_linear = nn.Linear(d_model, d_model)
-        self.out_linear = nn.Linear(d_model, d_model)
+        self.q_linear = nn.Linear(d_embed, d_embed)
+        self.k_linear = nn.Linear(d_embed, d_embed)
+        self.v_linear = nn.Linear(d_embed, d_embed)
+        self.out_linear = nn.Linear(d_embed, d_embed)
 
-    def forward(self, query, key, value, mask=None):
-        batch_size = query.size(0)
+    def forward(self, x, mask=None):
+        B, L, _ = x.shape
 
-        q = self.q_linear(query).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
-        k = self.k_linear(key).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
-        v = self.v_linear(value).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        q = self.q_linear(x).view(B, L, self.num_heads, self.head_dim).transpose(1, 2)
+        k = self.k_linear(x).view(B, L, self.num_heads, self.head_dim).transpose(1, 2)
+        v = self.v_linear(x).view(B, L, self.num_heads, self.head_dim).transpose(1, 2)
 
         scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.head_dim)
 
@@ -52,58 +53,78 @@ class MultiHeadAttention(nn.Module):
             scores = scores.masked_fill(mask == 0, -1e9)
 
         attention = F.softmax(scores, dim=-1)
-        context = torch.matmul(attention, v)
+        output = torch.matmul(attention, v)
 
-        context = context.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
-        return self.out_linear(context)
+        output = output.transpose(1, 2).contiguous().view(B, L, self.d_embed)
+        return self.out_linear(output)
 
 
 class FeedForward(nn.Module):
 
-    def __init__(self, d_model, d_ff):
+    def __init__(self, d_embed: int, d_ff: int, dropout: float):
         super().__init__()
-        self.linear1 = nn.Linear(d_model, d_ff)
-        self.linear2 = nn.Linear(d_ff, d_model)
-        self.dropout = nn.Dropout(DROPOUT)
+        self.linear1 = nn.Linear(d_embed, d_ff)
+        self.linear2 = nn.Linear(d_ff, d_embed)
+        self.dropout = nn.Dropout(dropout)
+        self.act = nn.GELU()
 
     def forward(self, x):
-        return self.linear2(self.dropout(F.relu(self.linear1(x))))
+        return self.linear2(self.dropout(self.act(self.linear1(x))))
 
 
 class TransformerBlock(nn.Module):
 
-    def __init__(self, d_model, num_heads, d_ff):
+    def __init__(self, d_embed: int, num_heads: int, d_ff: int, dropout: float):
         super().__init__()
-        self.attention = MultiHeadAttention(d_model, num_heads)
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        self.feed_forward = FeedForward(d_model, d_ff)
-        self.dropout = nn.Dropout(DROPOUT)
+        self.attn = MultiHeadAttention(d_embed, num_heads)
+        self.ln1 = nn.LayerNorm(d_embed)
+        self.ln2 = nn.LayerNorm(d_embed)
+        self.ff = FeedForward(d_embed, d_ff, dropout)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, mask=None):
-        attn_output = self.attention(x, x, x, mask)
-        x = self.norm1(x + self.dropout(attn_output))
-        ff_output = self.feed_forward(x)
-        x = self.norm2(x + self.dropout(ff_output))
+        attn_output = self.attn(x, mask)
+        x = self.ln1(x + self.dropout(attn_output))
+        ff_output = self.ff(x)
+        x = self.ln2(x + self.dropout(ff_output))
         return x
 
 
 class Transformer(nn.Module):
 
-    def __init__(self, vocab_size):
+    def __init__(self, vocab_size: int, padding_idx: int):
         super().__init__()
-        self.embedding = nn.Embedding(vocab_size, EMBEDDING_DIM)
-        self.pos_encoding = PositionalEncoding(EMBEDDING_DIM, MAX_LENGTH)
-        self.transformer = TransformerBlock(EMBEDDING_DIM, NUM_HEADS, FF_PROJECTION_DIM)
-        self.dropout = nn.Dropout(DROPOUT)
-        self.classifier = nn.Linear(EMBEDDING_DIM, NUM_CLASSES)
 
-    def forward(self, input_ids, attention_mask=None):
+        self.embedding = nn.Embedding(
+            vocab_size, TransformerConfig.EMBEDDING_DIM, padding_idx=padding_idx
+        )
+
+        nn.init.normal_(self.embedding.weight)
+
+        self.pos_encoding = PositionalEncoding(
+            TransformerConfig.EMBEDDING_DIM, MAX_LENGTH, TransformerConfig.DROPOUT
+        )
+        self.transformer = nn.ModuleList()
+
+        for _ in range(TransformerConfig.LAYERS):
+            self.transformer.append(
+                TransformerBlock(
+                    TransformerConfig.EMBEDDING_DIM,
+                    TransformerConfig.NUM_HEADS,
+                    TransformerConfig.FF_PROJECTION_DIM,
+                    TransformerConfig.DROPOUT,
+                )
+            )
+
+        self.dropout = nn.Dropout(TransformerConfig.DROPOUT)
+        self.classifier = nn.Linear(TransformerConfig.EMBEDDING_DIM, TransformerConfig.NUM_CLASSES)
+
+    def forward(self, input_ids, mask=None):
         x = self.embedding(input_ids)
-        x = self.pos_encoding(x.transpose(0, 1)).transpose(0, 1)
-        x = self.dropout(x)
+        x = self.pos_encoding(x)
 
-        x = self.transformer(x, attention_mask)
+        for i, _transformer in enumerate(self.transformer):
+            x = _transformer(x, mask[:, None, None, :])
 
-        final_token = x[:, -1, :]
+        final_token = x[:, 0, :]
         return self.classifier(final_token)

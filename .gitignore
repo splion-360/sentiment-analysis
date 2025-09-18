@@ -213,6 +213,7 @@ __marimo__/
 # Data 
 **/*.zip
 **/*.csv
+**/weights/
 
 # Project files 
 **/.vscode 
