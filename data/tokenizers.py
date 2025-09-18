@@ -6,6 +6,14 @@ from multiprocessing import Pool
 
 from nltk.stem import SnowballStemmer
 from nltk.tokenize import TweetTokenizer as NLTKTweetTokenizer
+from nltk.tokenize.treebank import TreebankWordDetokenizer
+from tokenizers import Tokenizer
+from tokenizers.decoders import ByteLevel as ByteLevelDecoder
+from tokenizers.models import BPE
+from tokenizers.normalizers import NFD, Lowercase, Sequence, StripAccents
+from tokenizers.pre_tokenizers import ByteLevel
+from tokenizers.processors import TemplateProcessing
+from tokenizers.trainers import BpeTrainer
 from tqdm import tqdm
 
 from config import MAX_LENGTH, NUM_WORKERS, USE_STEMMING, setup_logger
@@ -14,12 +22,33 @@ logger = setup_logger(__name__, "VIOLET")
 
 
 class BaseTokenizer(ABC):
+    SPECIALS = ("[PAD]", "[UNK]", "[CLS]", "[SEP]")
+    PAD, UNK, CLS, SEP = SPECIALS
 
     def __init__(self, tokenizer_name: str):
         self._vocab = None
-        self._vocab_file = os.path.join(
-            os.path.join("data", "toks"), f"{tokenizer_name}_vocab.json"
-        )
+        self._vocab_file = os.path.join("data", "toks", f"{tokenizer_name}_vocab.json")
+        self._model_file = os.path.join("data", "toks", f"{tokenizer_name}.json")
+
+        self._detokenizer = TreebankWordDetokenizer()
+
+    def decode(self, input_ids: list[int]) -> str:
+        vocab = self.get_vocab
+
+        itos = vocab.get("itos", [])
+        if not itos:
+            logger.warning("No vocabulary found. Not decoding")
+            return
+
+        tokens = []
+        for i in input_ids:
+            if i < 0 or i >= len(itos):
+                continue
+            tok = itos[i]
+            if tok in self.SPECIALS:
+                continue
+            tokens.append(tok)
+        return self._detokenizer.detokenize(tokens)
 
     @abstractmethod
     def tokenize(self, text: str) -> list[str]:
@@ -69,8 +98,6 @@ class BaseTokenizer(ABC):
 
 
 class TweetTokenizer(BaseTokenizer):
-    SPECIALS = ["[PAD]", "[UNK]", "[CLS]", "[SEP]"]
-    PAD, UNK, CLS, SEP = SPECIALS
 
     def __init__(self, preserve_case=False, reduce_len=True, strip_handles=True):
         self.name = "tweet"
@@ -131,37 +158,119 @@ class TweetTokenizer(BaseTokenizer):
         logger.info(f"Successfully built vocab for {self.name.upper()} with {len(itos)} tokens")
 
     def numericalize(self, tokens: list[str], stoi: dict) -> list[int]:
-        return [stoi.get(token, stoi[self.unk]) for token in tokens]
+        return [stoi.get(token, stoi[self.UNK]) for token in tokens]
 
-    @classmethod
-    def encode(cls, text: str, vocab: dict, max_len: int = MAX_LENGTH) -> dict:
+    def encode(self, text: str, vocab: dict, max_len: int = MAX_LENGTH) -> dict:
         stoi = vocab["stoi"]
 
-        ids = [stoi[cls.CLS]]
-        tokens = cls.tokenize(text)
-        ids += cls.numericalize(tokens, stoi)
-        ids += [stoi[cls.SEP]]
+        ids = [stoi[self.CLS]]
+        tokens = self.tokenize(text)
+        ids += self.numericalize(tokens, stoi)
+        ids += [stoi[self.SEP]]
 
         if len(ids) > max_len:
             ids = ids[:max_len]
-            ids[-1] = stoi[cls.SEP]
+            ids[-1] = stoi[self.SEP]
 
         attn = [1] * len(ids)
         if len(ids) < max_len:
             pad_len = max_len - len(ids)
-            ids += [stoi[cls.PAD]] * pad_len
+            ids += [stoi[self.PAD]] * pad_len
             attn += [0] * pad_len
 
         return {"input_ids": ids, "attention_mask": attn}
 
 
 class BPETokenizer(BaseTokenizer):
+    def __init__(self):
+        super().__init__("bpe")
+        self.tokenizer = None
+
+        if os.path.exists(self._model_file):
+            self.tokenizer = Tokenizer.from_file(self._model_file)
+            logger.info(f"Loaded BPE tokenizer from {self._model_file}")
 
     def tokenize(self, text: str) -> list[str]:
-        pass
+        if self.tokenizer is None:
+            raise ValueError("Invalid tokenizer")
 
-    def build_vocab(self, texts: list[str], **kwargs) -> dict:
-        pass
+        enc = self.tokenizer.encode(text)
+        return enc.tokens
 
-    def encode(self, text: str, vocab: dict, **kwargs) -> dict:
-        pass
+    def build_vocab(self, texts: list[str], max_vocab: int, min_frequency: int) -> dict:
+        tok = Tokenizer(BPE(unk_token=self.UNK))
+        tok.normalizer = Sequence([NFD(), Lowercase(), StripAccents()])
+        tok.pre_tokenizer = ByteLevel()
+        tok.decoder = ByteLevelDecoder()
+
+        trainer = BpeTrainer(
+            vocab_size=max_vocab,
+            min_frequency=min_frequency,
+            special_tokens=list(self.SPECIALS) + ["[MASK]"],
+            show_progress=True,
+        )
+        tok.train_from_iterator(texts, trainer)
+
+        tok.post_processor = TemplateProcessing(
+            single=f"{self.CLS} $A {self.SEP}",
+            pair=f"{self.CLS} $A {self.SEP} $B {self.SEP}",
+            special_tokens=[
+                (self.CLS, tok.token_to_id(self.CLS)),
+                (self.SEP, tok.token_to_id(self.SEP)),
+            ],
+        )
+
+        os.makedirs(os.path.dirname(self._model_file), exist_ok=True)
+        tok.save(self._model_file)
+        self.tokenizer = tok
+        logger.info(f"Saved BPE tokenizer model to {self._model_file}")
+
+        vocab_dict = tok.get_vocab()
+        itos = [None] * len(vocab_dict)
+        for token, idx in vocab_dict.items():
+            itos[idx] = token
+        vocab = {"stoi": vocab_dict, "itos": itos}
+        self.save_vocab(vocab)
+        logger.info(f"Successfully trained BPE tokenizer with {len(vocab_dict)} tokens")
+        return vocab
+
+    def encode(self, text: str, vocab: dict, max_len: int = MAX_LENGTH) -> dict:
+        if self.tokenizer is None:
+            if not os.path.exists(self._model_file):
+                raise FileNotFoundError("Tokenizer file not found. Build the vocabulary first")
+            self.tokenizer = Tokenizer.from_file(self._model_file)
+
+        pad_id = vocab["stoi"][self.PAD]
+        enc = self.tokenizer.encode("" if text is None else text)
+        input_ids = enc.ids
+        attn = enc.attention_mask
+
+        if len(input_ids) > max_len:
+            input_ids = input_ids[:max_len]
+            input_ids[-1] = vocab["stoi"][self.SEP]
+            attn = attn[:max_len]
+        if len(input_ids) < max_len:
+            pad_n = max_len - len(input_ids)
+            input_ids += [pad_id] * pad_n
+            attn += [0] * pad_n
+
+        return {"input_ids": input_ids, "attention_mask": attn}
+
+    def decode(self, input_ids: list[int]) -> str:
+        if self.tokenizer is None:
+            if not os.path.exists(self._model_file):
+                raise FileNotFoundError("Tokenizer file not found. Build the vocabulary first")
+            self.tokenizer = Tokenizer.from_file(self._model_file)
+
+        specials = set(self.SPECIALS)
+        ids = []
+        for i in input_ids:
+            tok = self.get_vocab["itos"][i] if self.get_vocab else None
+            if tok is None or tok in specials:
+                continue
+            ids.append(i)
+        try:
+            return self.tokenizer.decode(ids)
+        except Exception:
+            toks = [self.get_vocab["itos"][i] for i in ids if self.get_vocab]
+            return " ".join(toks)
