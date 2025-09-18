@@ -12,8 +12,10 @@ LABELS = {0: "NEGATIVE", 2: "NEUTRAL", 4: "POSITIVE"}
 
 # Dataset & Tokenizer Config
 DATA_PATH = 'data/trainingandtestdata/'
-TRAIN_FILE = 'training.1600000.processed.noemoticon.csv'
-TEST_FILE = 'testdata.manual.2009.06.14.csv'
+TRAIN_FILE = 'training.1600000.processed.noemoticon.csv'  # this is the original train file
+# (do not use this for training)
+TEST_FILE = 'testdata.manual.2009.06.14.csv'  # this is the unprocessed test file
+# (do not use this for testing)
 MAX_VOCAB_SIZE = 30000
 MIN_FREQ = 2
 MAX_LENGTH = 40
@@ -33,14 +35,14 @@ class TransformerConfig:
 
 # Training Config
 MODEL_NAME = "transformer"
-TOKENIZER = "tweet"
+TOKENIZER = "bpe"
 
 LEARNING_RATE = 1e-4
 BATCH_SIZE = 128
 NUM_EPOCHS = 50
 TRAIN_SPLIT = 0.99
 DEVICE = torch.device(f'cuda:{0}' if torch.cuda.is_available() else 'cpu')
-WANDB_PROJECT = "sentiment-analysis"
+WANDB_PROJECT = "sentiment-analysis-improved"
 NUM_WORKERS = 16
 LOG_INTERVAL = 1000
 EARLY_STOPPING_PATIENCE = 10
