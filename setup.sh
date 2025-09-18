@@ -76,9 +76,8 @@ setup_venv() {
     log_info "Upgrading pip..."
     pip install --upgrade pip > /dev/null 2>&1
     
-    if [ -f "requirements.txt" ]; then
-        log_info "Installing dependencies from requirements.txt..."
-        pip install -r requirements.txt
+    log_info "Installing dependencies from requirements.txt..."
+    pip install -r requirements.txt
 
     log_success "Virtual environment created and dependencies installed"
 }
@@ -103,7 +102,7 @@ create_directories() {
         fi
     done
     
-    log_success "Project directories created ✓"
+    log_success "Project directories created "
 }
 
 
@@ -120,6 +119,7 @@ main() {
     check_python
     setup_venv
     create_directories
+    log_header "Setup successful"
 }
 
 # Run main function
