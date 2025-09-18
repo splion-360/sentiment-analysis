@@ -1,12 +1,14 @@
 import argparse
 import os
 import sys
+from time import time
 
 import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.metrics import (
     accuracy_score,
+    classification_report,
     confusion_matrix,
     f1_score,
     precision_score,
@@ -21,22 +23,48 @@ from config import (
     BATCH_SIZE,
     DATA_PATH,
     DEVICE,
+    EARLY_STOPPING_MIN_DELTA,
+    EARLY_STOPPING_PATIENCE,
     LEARNING_RATE,
     LOG_INTERVAL,
     MAX_LENGTH,
+    MODEL_NAME,
     NUM_EPOCHS,
     SEED,
+    TOKENIZER,
     WANDB_PROJECT,
     set_seed,
     setup_logger,
 )
-from data.tokenizers import BPETokenizer, TweetTokenizer
+from data.encoders import BPETokenizer, GPT2Tokenizer, TweetTokenizer
 from data.utils import get_dataloaders
 from training.models.transformer import Transformer
 
 logger = setup_logger(__name__, "BLUE")
 
 torch.set_float32_matmul_precision('high')
+
+
+class EarlyStopping:
+
+    def __init__(self, patience: int, min_delta: float):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.best_loss = float('inf')
+        self.counter = 0
+
+    def can_stop(self, loss: float) -> bool:
+
+        if loss < self.best_loss - self.min_delta:
+            self.best_loss = loss
+            self.counter = 0
+            return False
+        else:
+            self.counter += 1
+            if self.counter >= self.patience:
+                logger.info("Triggering Early Stopping")
+                return True
+            return False
 
 
 class CosineDecayLR:
@@ -63,7 +91,7 @@ class CosineDecayLR:
 class Trainer:
 
     AVAILABLE_MODELS = ["transformer"]
-    AVAILABLE_TOKENIZERS = ["tweet", "bpe"]
+    AVAILABLE_TOKENIZERS = ["tweet", "bpe", "gpt2"]
 
     def __init__(
         self,
@@ -74,6 +102,8 @@ class Trainer:
         max_len: int = None,
         resume_path=None,
         use_wandb: bool = True,
+        early_stopping_patience: int = EARLY_STOPPING_PATIENCE,
+        early_stopping_min_delta: float = EARLY_STOPPING_MIN_DELTA,
     ):
         set_seed(SEED)
 
@@ -86,10 +116,15 @@ class Trainer:
         self.start_epoch = 0
         self.max_len = max_len
         self.use_wandb = use_wandb
-        self.save_path = f"training/weights/{self.model_name}/{self.tokenizer_name}"
+        self.early_stopping = EarlyStopping(early_stopping_patience, early_stopping_min_delta)
+
+        timestamp = int(time() * 1e7)
+
+        self.save_path = f"training/weights/{self.model_name}/{self.tokenizer_name}/run_{timestamp}"
         os.makedirs(self.save_path, exist_ok=True)
 
-        self._setup()
+        self._setup_tokenizer()
+        self._setup_data_and_model()
 
         if self.use_wandb:
             wandb.login()
@@ -108,20 +143,23 @@ class Trainer:
                 name=f"Training {model_name} with {tokenizer_name}",
             )
 
-    def _setup(self):
+    def _setup_tokenizer(self):
         if self.tokenizer_name == "tweet":
             self.tokenizer = TweetTokenizer()
         elif self.tokenizer_name == "bpe":
             self.tokenizer = BPETokenizer()
+        elif self.tokenizer_name == "gpt2":
+            self.tokenizer = GPT2Tokenizer()
         else:
             raise ValueError(f"Unknown tokenizer: {self.tokenizer_name}")
 
-        self.vocab = self.tokenizer.get_vocab
+        self.vocab = self.tokenizer.fetch_vocab
         if self.vocab is None:
             raise ValueError(
                 f"No vocabulary found for {self.tokenizer_name}. Run prepare.py first."
             )
 
+    def _setup_data_and_model(self):
         target_mapping = {0: 0, 4: 1}
         self.train_loader, self.val_loader = get_dataloaders(
             self.data_path,
@@ -156,12 +194,41 @@ class Trainer:
         self.start_epoch = checkpoint.get('epoch', 0) + 1
         self.best_val_loss = checkpoint.get('best_val_loss', float('inf'))
 
+        # Load tokenizer
+        checkpoint_tokenizer = checkpoint.get('tokenizer_name')
+        if checkpoint_tokenizer is not None and checkpoint_tokenizer != self.tokenizer_name:
+            logger.warning(
+                f"Checkpoint tokenizer ({checkpoint_tokenizer}) \
+                    differs from current ({self.tokenizer_name})"
+            )
+            logger.info(f"Using checkpoint tokenizer: {checkpoint_tokenizer}")
+            self.tokenizer_name = checkpoint_tokenizer
+            self._setup_tokenizer()
+
         logger.info(f"Resumed from epoch {self.start_epoch}")
         logger.info(f"Best validation loss: {self.best_val_loss:.4f}")
 
         return optimizer
 
+    def _process_model_output(self, outputs):
+        if isinstance(outputs, tuple):
+            return outputs[0]
+        return outputs
+
     def train_epoch(self, epoch, optimizer, criterion, device, scheduler, step_offset):
+        """Execute one training epoch with gradient updates and logging.
+
+        Args:
+            epoch: Current epoch number for logging
+            optimizer: PyTorch optimizer for gradient updates
+            criterion: Loss function for training
+            device: Device to run training on
+            scheduler: Learning rate scheduler
+            step_offset: Global step offset for scheduler
+
+        Returns:
+            Tuple of (average_loss, predictions_list, labels_list)
+        """
         self.model.train()
         total_loss = 0
         all_preds = []
@@ -174,14 +241,15 @@ class Trainer:
 
             optimizer.zero_grad()
             outputs = self.model(input_ids, attention_mask)
-            loss = criterion(outputs, labels)
+            model_output = self._process_model_output(outputs)
+            loss = criterion(model_output, labels)
             loss.backward()
             optimizer.step()
 
             scheduler.step(step_offset + i)
 
             total_loss += loss.item()
-            _, predicted = torch.max(outputs.data, 1)
+            _, predicted = torch.max(model_output.data, 1)
             all_preds.extend(predicted.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
 
@@ -213,10 +281,11 @@ class Trainer:
                 labels = batch['labels'].to(device)
 
                 outputs = self.model(input_ids, attention_mask)
-                loss = criterion(outputs, labels)
+                model_output = self._process_model_output(outputs)
+                loss = criterion(model_output, labels)
 
                 total_loss += loss.item()
-                _, predicted = torch.max(outputs.data, 1)
+                _, predicted = torch.max(model_output.data, 1)
                 all_preds.extend(predicted.cpu().numpy())
                 all_labels.extend(labels.cpu().numpy())
 
@@ -228,6 +297,7 @@ class Trainer:
         precision = precision_score(labels, preds)
         recall = recall_score(labels, preds)
         cm = confusion_matrix(labels, preds)
+        cr = classification_report(labels, preds)
 
         return {
             'accuracy': accuracy,
@@ -235,11 +305,25 @@ class Trainer:
             'precision': precision,
             'recall': recall,
             'confusion_matrix': cm,
+            'classification_report': cr,
         }
 
-    def save_model(self, epoch, val_loss, optimizer):
+    def save_model(self, epoch, val_loss, optimizer, is_best=False):
+        """Save model checkpoint with optional best model flag.
 
-        model_path = os.path.join(self.save_path, f"{epoch}.pth")
+        Args:
+            epoch: Current epoch number
+            val_loss: Current validation loss
+            optimizer: Current optimizer state
+            is_best: Whether this is the best model (saves as best_model.pth)
+
+        Returns:
+            None
+        """
+        if is_best:
+            model_path = os.path.join(self.save_path, "best_model.pth")
+        else:
+            model_path = os.path.join(self.save_path, f"{epoch}.pth")
 
         checkpoint = {
             'epoch': epoch,
@@ -248,11 +332,27 @@ class Trainer:
             'val_loss': val_loss,
             'best_val_loss': self.best_val_loss,
             'vocab': self.vocab,
+            'tokenizer_name': self.tokenizer_name,
+            'model_name': self.model_name,
         }
         torch.save(checkpoint, model_path)
-        logger.info(f"Model saved at {model_path}")
+
+        if is_best:
+            logger.info(f"Best model saved at {model_path}")
+        else:
+            logger.info(f"Model saved at {model_path}")
 
     def train(self, epochs, lr, device):
+        """Train the model with cosine learning rate decay and early stopping.
+
+        Args:
+            epochs: Number of training epochs
+            lr: Initial learning rate
+            device: Device to train on (cuda/cpu)
+
+        Returns:
+            None
+        """
         device = torch.device(device if torch.cuda.is_available() else "cpu")
         self.model = self.model.to(device)
         self.model = torch.compile(self.model)
@@ -319,13 +419,19 @@ class Trainer:
             logger.info(f"\nValidation Confusion Matrix (Epoch {epoch}):")
             logger.info(f"{val_metrics['confusion_matrix']}")
 
-            if epoch % self.save_freq == 0 or val_loss < self.best_val_loss:
-                self.save_model(epoch, val_loss, optimizer)
+            if epoch % self.save_freq == 0:
                 if val_loss < self.best_val_loss:
                     self.best_val_loss = val_loss
                     logger.info(f"New best validation loss: {val_loss:.4f}")
+                    self.save_model(epoch, val_loss, optimizer, is_best=True)
+                else:
+                    self.save_model(epoch, val_loss, optimizer, is_best=False)
 
-        self.save_model(epochs - 1, val_loss, optimizer)
+            if self.early_stopping.can_stop(val_loss):
+                logger.info(f"Early stopping triggered at epoch {epoch}")
+                break
+
+        self.save_model(epochs - 1, val_loss, optimizer)  # Save the model at the final epoch
         logger.info(f"Final model saved at epoch {epochs - 1}")
 
         if self.use_wandb:
@@ -334,31 +440,31 @@ class Trainer:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="transformer", choices=Trainer.AVAILABLE_MODELS)
-    parser.add_argument("--tokenizer", default="tweet", choices=Trainer.AVAILABLE_TOKENIZERS)
-    parser.add_argument("--data_path", type=str, default=os.path.join(DATA_PATH, "train.csv"))
-    parser.add_argument("--epochs", type=int, default=NUM_EPOCHS)
-    parser.add_argument("--max-len", type=int, default=MAX_LENGTH)
-    parser.add_argument("--batch_size", type=int, default=BATCH_SIZE)
-    parser.add_argument("--lr", type=float, default=LEARNING_RATE)
-    parser.add_argument("--device", default=DEVICE)
-    parser.add_argument("--save_freq", type=int, default=5)
+    parser.add_argument(
+        "--data_path",
+        type=str,
+        default=os.path.join(DATA_PATH, "train.csv"),
+        help="Training data path",
+    )
+    parser.add_argument("--save_freq", type=int, default=5, help="Save model every N epochs")
     parser.add_argument("--resume", help="Path to checkpoint to resume training from")
-    parser.add_argument("--wandb", action="store_true", default=True, help="use wandb for logging")
+    parser.add_argument("--wandb", action="store_true", default=False, help="Use wandb for logging")
     args = parser.parse_args()
 
     set_seed(SEED)
 
     trainer = Trainer(
-        args.model,
-        args.tokenizer,
+        MODEL_NAME,
+        TOKENIZER,
         args.data_path,
         args.save_freq,
-        args.max_len,
+        MAX_LENGTH,
         args.resume,
         args.wandb,
+        EARLY_STOPPING_PATIENCE,
+        EARLY_STOPPING_MIN_DELTA,
     )
-    trainer.train(args.epochs, args.lr, args.device)
+    trainer.train(NUM_EPOCHS, LEARNING_RATE, DEVICE)
 
 
 if __name__ == "__main__":

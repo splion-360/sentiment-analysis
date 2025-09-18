@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from config import BATCH_SIZE, NUM_WORKERS, SEED, TRAIN_SPLIT, set_seed, setup_logger
-from data.tokenizers import BPETokenizer, TweetTokenizer
+from data.encoders import BPETokenizer, TweetTokenizer
 
 logger = setup_logger(__name__, "RED")
 
@@ -227,7 +227,7 @@ class SentimentDataset(Dataset):
         self.texts = texts
         self.targets = targets
         self.tokenizer = tokenizer
-        self.vocab = tokenizer.get_vocab
+        self.vocab = tokenizer.fetch_vocab
         if self.vocab is None:
             raise ValueError("No vocabulary found for tokenizer. Ensure prepare.py is run!")
 
@@ -277,6 +277,24 @@ def get_dataloaders(
     is_train: bool = True,
     max_length: int = None,
 ):
+    """
+    Create pytorch dataloaders .
+
+    Args:
+        data_path: Path to the CSV data file
+        tokenizer: Tokenizer instance for text processing
+        batch_size: Number of samples per batch
+        target_mapping: Dictionary to map original labels to new labels
+        train_split: Fraction of data to use for training (rest for validation)
+        stratify: Whether to stratify split by target labels
+        num_workers: Number of worker processes for data loading
+        pin_memory: Whether to pin memory for faster GPU transfer
+        is_train: If True, returns train/val loaders; if False, returns single test loader
+        max_length: Maximum sequence length for tokenization
+
+    Returns:
+        DataLoader or tuple of (train_loader, val_loader) depending on is_train flag
+    """
     set_seed(SEED)
 
     if not os.path.exists(data_path):

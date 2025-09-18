@@ -219,3 +219,5 @@ __marimo__/
 **/.vscode 
 **/CLAUDE.md
 **/wandb
+**/toks
+**/inference

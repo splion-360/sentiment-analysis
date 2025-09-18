@@ -32,19 +32,23 @@ class TransformerConfig:
 
 
 # Training Config
+MODEL_NAME = "transformer"
+TOKENIZER = "tweet"
+
 LEARNING_RATE = 1e-4
 BATCH_SIZE = 128
-NUM_EPOCHS = 10
+NUM_EPOCHS = 50
 TRAIN_SPLIT = 0.99
 DEVICE = torch.device(f'cuda:{0}' if torch.cuda.is_available() else 'cpu')
 WANDB_PROJECT = "sentiment-analysis"
 NUM_WORKERS = 16
 LOG_INTERVAL = 1000
+EARLY_STOPPING_PATIENCE = 10
+EARLY_STOPPING_MIN_DELTA = 1e-3
 
-# App Configs
-MODEL_NAME = "transformer"
-MODEL_PATH = "training/weights/transformer/7.pth"
-TOKENIZER = "tweet"
+
+# Inference (App configs)
+MODEL_PATH = "training/inference/best.pth"
 
 
 class ColoredFormatter(logging.Formatter):

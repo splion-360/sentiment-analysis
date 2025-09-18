@@ -15,6 +15,7 @@ from tokenizers.pre_tokenizers import ByteLevel
 from tokenizers.processors import TemplateProcessing
 from tokenizers.trainers import BpeTrainer
 from tqdm import tqdm
+from transformers import GPT2TokenizerFast
 
 from config import MAX_LENGTH, NUM_WORKERS, USE_STEMMING, setup_logger
 
@@ -22,18 +23,22 @@ logger = setup_logger(__name__, "VIOLET")
 
 
 class BaseTokenizer(ABC):
-    SPECIALS = ("[PAD]", "[UNK]", "[CLS]", "[SEP]")
+    SPECIALS = ["[PAD]", "[UNK]", "[CLS]", "[SEP]"]
     PAD, UNK, CLS, SEP = SPECIALS
 
     def __init__(self, tokenizer_name: str):
         self._vocab = None
-        self._vocab_file = os.path.join("data", "toks", f"{tokenizer_name}_vocab.json")
-        self._model_file = os.path.join("data", "toks", f"{tokenizer_name}.json")
+
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self._vocab_file = os.path.join(
+            project_root, "data", "toks", f"{tokenizer_name}_vocab.json"
+        )
+        self._model_file = os.path.join(project_root, "data", "toks", f"{tokenizer_name}.json")
 
         self._detokenizer = TreebankWordDetokenizer()
 
     def decode(self, input_ids: list[int]) -> str:
-        vocab = self.get_vocab
+        vocab = self.fetch_vocab
 
         itos = vocab.get("itos", [])
         if not itos:
@@ -67,7 +72,7 @@ class BaseTokenizer(ABC):
         return os.path.exists(self._vocab_file)
 
     @property
-    def get_vocab(self) -> dict | None:
+    def fetch_vocab(self) -> dict | None:
         if self._vocab is not None:
             return self._vocab
 
@@ -96,6 +101,16 @@ class BaseTokenizer(ABC):
             logger.error(f"Failed to save vocabulary to {self._vocab_file}: {e}")
             raise
 
+    def _build_vocab_from_dict(self, vocab_dict: dict) -> dict:
+        itos = [None] * len(vocab_dict)
+        for token, idx in vocab_dict.items():
+            itos[idx] = token
+
+        vocab = {"stoi": vocab_dict, "itos": itos}
+        self.save_vocab(vocab)
+        logger.info(f"Successfully built vocab for {self.name.upper()} with {len(itos)} tokens")
+        return vocab
+
 
 class TweetTokenizer(BaseTokenizer):
 
@@ -123,7 +138,18 @@ class TweetTokenizer(BaseTokenizer):
             batch_tokens.extend(tokens)
         return batch_tokens
 
-    def build_vocab(self, texts: list[str], max_vocab: int, min_freq: int) -> None:
+    def build_vocab(self, texts: list[str], max_vocab: int, min_freq: int) -> dict:
+        """
+        Build vocabulary from texts
+
+        Args:
+            texts: List of text strings to build vocabulary from
+            max_vocab: Maximum vocabulary size to keep
+            min_freq: Minimum frequency threshold for tokens
+
+        Returns:
+            Dictionary containing 'stoi' (string to index) and 'itos' (index to string) mappings
+        """
         counter = collections.Counter()
 
         logger.info(f"Building vocabulary from {len(texts)} texts using {NUM_WORKERS} workers...")
@@ -156,6 +182,7 @@ class TweetTokenizer(BaseTokenizer):
 
         self.save_vocab(vocab)
         logger.info(f"Successfully built vocab for {self.name.upper()} with {len(itos)} tokens")
+        return vocab
 
     def numericalize(self, tokens: list[str], stoi: dict) -> list[int]:
         return [stoi.get(token, stoi[self.UNK]) for token in tokens]
@@ -183,21 +210,39 @@ class TweetTokenizer(BaseTokenizer):
 
 class BPETokenizer(BaseTokenizer):
     def __init__(self):
-        super().__init__("bpe")
+        self.name = "bpe"
+        super().__init__(self.name)
         self.tokenizer = None
 
         if os.path.exists(self._model_file):
             self.tokenizer = Tokenizer.from_file(self._model_file)
             logger.info(f"Loaded BPE tokenizer from {self._model_file}")
 
+    def _ensure_tokenizer_loaded(self):
+        if self.tokenizer is None:
+            if not os.path.exists(self._model_file):
+                raise FileNotFoundError("Tokenizer file not found. Build the vocabulary first")
+            self.tokenizer = Tokenizer.from_file(self._model_file)
+
     def tokenize(self, text: str) -> list[str]:
         if self.tokenizer is None:
-            raise ValueError("Invalid tokenizer")
+            self._ensure_tokenizer_loaded()
 
         enc = self.tokenizer.encode(text)
         return enc.tokens
 
     def build_vocab(self, texts: list[str], max_vocab: int, min_frequency: int) -> dict:
+        """
+        Train BPE tokenizer and build vocabulary with byte-level processing.
+
+        Args:
+            texts: List of text strings to train tokenizer on
+            max_vocab: Maximum vocabulary size for BPE training
+            min_frequency: Minimum frequency threshold for subword merges
+
+        Returns:
+            Dictionary containing 'stoi' (string to index) and 'itos' (index to string) mappings
+        """
         tok = Tokenizer(BPE(unk_token=self.UNK))
         tok.normalizer = Sequence([NFD(), Lowercase(), StripAccents()])
         tok.pre_tokenizer = ByteLevel()
@@ -226,19 +271,10 @@ class BPETokenizer(BaseTokenizer):
         logger.info(f"Saved BPE tokenizer model to {self._model_file}")
 
         vocab_dict = tok.get_vocab()
-        itos = [None] * len(vocab_dict)
-        for token, idx in vocab_dict.items():
-            itos[idx] = token
-        vocab = {"stoi": vocab_dict, "itos": itos}
-        self.save_vocab(vocab)
-        logger.info(f"Successfully trained BPE tokenizer with {len(vocab_dict)} tokens")
-        return vocab
+        return self._build_vocab_from_dict(vocab_dict)
 
     def encode(self, text: str, vocab: dict, max_len: int = MAX_LENGTH) -> dict:
-        if self.tokenizer is None:
-            if not os.path.exists(self._model_file):
-                raise FileNotFoundError("Tokenizer file not found. Build the vocabulary first")
-            self.tokenizer = Tokenizer.from_file(self._model_file)
+        self._ensure_tokenizer_loaded()
 
         pad_id = vocab["stoi"][self.PAD]
         enc = self.tokenizer.encode("" if text is None else text)
@@ -257,20 +293,57 @@ class BPETokenizer(BaseTokenizer):
         return {"input_ids": input_ids, "attention_mask": attn}
 
     def decode(self, input_ids: list[int]) -> str:
-        if self.tokenizer is None:
-            if not os.path.exists(self._model_file):
-                raise FileNotFoundError("Tokenizer file not found. Build the vocabulary first")
-            self.tokenizer = Tokenizer.from_file(self._model_file)
+        self._ensure_tokenizer_loaded()
 
         specials = set(self.SPECIALS)
         ids = []
         for i in input_ids:
-            tok = self.get_vocab["itos"][i] if self.get_vocab else None
+            tok = self.fetch_vocab["itos"][i] if self.fetch_vocab else None
             if tok is None or tok in specials:
                 continue
             ids.append(i)
         try:
             return self.tokenizer.decode(ids)
         except Exception:
-            toks = [self.get_vocab["itos"][i] for i in ids if self.get_vocab]
+            toks = [self.fetch_vocab["itos"][i] for i in ids if self.fetch_vocab]
             return " ".join(toks)
+
+
+class GPT2Tokenizer(BaseTokenizer):
+    def __init__(self):
+        self.name = "gpt2"
+        super().__init__(self.name)
+        self.tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+        if self.PAD not in self.tokenizer.get_vocab():
+            self.tokenizer.add_special_tokens({"pad_token": self.PAD})
+
+    def tokenize(self, text: str) -> list[str]:
+        return self.tokenizer.tokenize(text)
+
+    def build_vocab(self, texts: list[str], max_vocab: int, min_frequency: int) -> dict:
+        vocab_dict = self.tokenizer.get_vocab()
+        return self._build_vocab_from_dict(vocab_dict)
+
+    def encode(self, text: str, vocab: dict = None, max_len: int = MAX_LENGTH) -> dict:
+        enc = self.tokenizer(
+            text,
+            padding="max_length",
+            truncation=True,
+            max_length=max_len,
+            return_tensors=None,
+        )
+        return {
+            "input_ids": enc["input_ids"],
+            "attention_mask": enc["attention_mask"],
+        }
+
+    def decode(self, input_ids: list[int]) -> str:
+        special_token_ids = {
+            self.tokenizer.pad_token_id,
+            self.tokenizer.eos_token_id,
+        }
+        if hasattr(self.tokenizer, 'bos_token_id') and self.tokenizer.bos_token_id:
+            special_token_ids.add(self.tokenizer.bos_token_id)
+
+        filtered_ids = [id for id in input_ids if id not in special_token_ids]
+        return self.tokenizer.decode(filtered_ids, skip_special_tokens=True)

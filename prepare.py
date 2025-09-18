@@ -13,7 +13,7 @@ from config import (
     set_seed,
     setup_logger,
 )
-from data.tokenizers import BPETokenizer, TweetTokenizer
+from data.encoders import BPETokenizer, GPT2Tokenizer, TweetTokenizer
 from data.utils import TextCleaner, load_data
 
 logger = setup_logger(__name__, "GREEN")
@@ -47,10 +47,18 @@ def clean_and_save_data(data_path: str, out_path: str) -> pd.DataFrame | None:
 
 
 def main():
+    """Main function to prepare sentiment analysis data and build tokenizer vocabularies.
+    
+    Args:
+        None (uses command line arguments)
+        
+    Returns:
+        None
+    """
     parser = argparse.ArgumentParser(description="Prepare sentiment analysis data")
     parser.add_argument(
         "--tokenizer",
-        choices=["tweet", "bpe"],
+        choices=["tweet", "bpe", "gpt2"],
         default="tweet",
         help="Tokenizer to use for vocabulary building",
     )
@@ -70,6 +78,8 @@ def main():
         tokenizer = TweetTokenizer()
     elif args.tokenizer == "bpe":
         tokenizer = BPETokenizer()
+    elif args.tokenizer == "gpt2":
+        tokenizer = GPT2Tokenizer()
     else:
         logger.error("Invalid tokenizer found. Not proceeding with vocabulary creation")
         return
