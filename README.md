@@ -15,7 +15,7 @@ sentiment-analysis/
 ├── data/                            
 │   ├── tokenizers.py                 # Tokenizer implementations (Tweet, BPE, GPT-2)
 │   ├── utils.py                      # Data loading and preprocessing utilities
-│   ├── eda.ipynb                     
+│   ├── eda.ipynb                     # Data analysis and visualizatoin (RECOMMENDED) 
 │   ├── toks/                         # Trained tokenizer files
 │   │   ├── bpe.json                  
 │   │   ├── bpe_vocab.json            
@@ -42,6 +42,10 @@ chmod +x setup.sh
 sh setup.sh  # ./setup.sh 
 ```
 <br>
+
+## EDA (Optional)
+The [`eda.ipynb`](./data/eda.ipynb) notebook provides a detailed visualization of the dataset and some statistics through which 
+some architectural decisions were guided. __HIGHLY RECOMMENDED__ for viewing before proceeding further 
 
 ## Training (Optional)
 
