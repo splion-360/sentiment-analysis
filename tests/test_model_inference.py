@@ -4,13 +4,13 @@ import statistics
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import pandas as pd
 import psutil
 import pytest
 import torch
 from fastapi.testclient import TestClient
 
 from config import DATA_PATH, setup_logger
+from data.utils import load_data
 from main import app
 from training.evaluate import inference
 
@@ -71,6 +71,7 @@ class ModelStressMetrics:
             "median_latency": statistics.median(self.latencies),
             "min_latency": min(self.latencies),
             "max_latency": max(self.latencies),
+            "p50_latency": (statistics.median(self.latencies) if self.latencies else 0),
             "p95_latency": (
                 statistics.quantiles(self.latencies, n=20)[18]
                 if len(self.latencies) >= 20
@@ -98,33 +99,15 @@ def client():
 def stress_test_data():
     test_data = []
 
-    # Try to load real test data
     test_path = os.path.join(DATA_PATH, "test.csv")
     if os.path.exists(test_path):
         try:
-            df = pd.read_csv(
-                test_path,
-                names=["target", "ids", "date", "flag", "user", "text"],
-                encoding="ISO-8859-1",
-            )
+            df = load_data(test_path, is_raw=False)
             real_texts = df['text'].dropna().head(100).tolist()
             test_data.extend(real_texts)
         except Exception as e:
             logger.warning(f"Could not load real test data: {e}")
 
-    # Add synthetic test cases
-    synthetic_cases = [
-        "I love this product!",
-        "This is terrible quality.",
-        "It's okay, nothing special.",
-        "Amazing service, highly recommend!",
-        "Worst experience ever, completely disappointed.",
-        "Perfect! Exactly what I needed!",
-        "Hate this so much, very disappointed",
-        "Could be better but not bad overall",
-    ]
-
-    test_data.extend(synthetic_cases)
     logger.info(f"Total test cases: {len(test_data)}")
     return test_data
 
@@ -132,7 +115,7 @@ def stress_test_data():
 def make_stress_request(client: TestClient, text: str) -> tuple[float, bool, str, float]:
     start_time = time.time()
     try:
-        response = client.post("/evaluate", json={"text": text})
+        response = client.post("/evaluate?verbose=false", json={"text": text})
         latency = time.time() - start_time
 
         if response.status_code == 200:
@@ -148,7 +131,7 @@ def make_stress_request(client: TestClient, text: str) -> tuple[float, bool, str
 
 class TestModelInference:
     def test_basic_inference(self):
-        """Test basic inference functionality"""
+        logger.info("=== Starting Basic Inference Test ===")
         test_text = "This is a test message"
         try:
             sentiment, confidence, cleaned = inference(test_text)
@@ -157,15 +140,13 @@ class TestModelInference:
             assert 0 <= confidence <= 1, f"Invalid confidence: {confidence}"
             assert isinstance(cleaned, str), "Cleaned text should be string"
 
-            logger.info("Basic inference test: SUCCESS")
-            logger.info(f"Input: {test_text}")
-            logger.info(f"Output: {sentiment} (confidence: {confidence})")
-
         except Exception as e:
             pytest.fail(f"Basic inference failed: {e}")
+        
+        logger.info("=== Basic Inference Test Completed ===")
 
-    def test_model_loading_reliability(self):
-        """Test repeated model loading"""
+    def test_model_loading(self):
+        logger.info("=== Starting Model Loading Test ===")
         for i in range(3):
             try:
                 if torch.cuda.is_available():
@@ -184,15 +165,17 @@ class TestModelInference:
 
             except Exception as e:
                 pytest.fail(f"Model loading failed on iteration {i+1}: {e}")
+        
+        logger.info("=== Model Loading Test Completed ===")
 
     def test_concurrent_requests(self, client, stress_test_data):
-        """Test concurrent API requests"""
+        logger.info("=== Starting Concurrent Requests Test ===")
         if not stress_test_data:
             pytest.skip("No stress test data available")
 
         metrics = ModelStressMetrics()
-        num_threads = 10
-        requests_per_thread = 5
+        num_threads = 20
+        requests_per_thread = 10
         test_texts = stress_test_data[:20]
 
         logger.info(
@@ -223,52 +206,16 @@ class TestModelInference:
         logger.info(f"  Error Rate: {results['error_rate']:.2%}")
         logger.info(f"  Throughput: {results['throughput']:.2f} req/s")
         logger.info(f"  Avg Latency: {results['avg_latency']:.3f}s")
+        logger.info(f"  P50 Latency: {results['p50_latency']:.3f}s")
+        logger.info(f"  P95 Latency: {results['p95_latency']:.3f}s")
 
         assert results['error_rate'] < 0.2, f"Error rate too high: {results['error_rate']:.2%}"
         assert results['throughput'] > 1.0, f"Throughput too low: {results['throughput']:.2f} req/s"
-
-    def test_edge_cases(self, client):
-        """Test edge case handling"""
-        edge_cases = [
-            "",
-            " ",
-            "a",
-            "no",
-            "yes",
-            "This is a very long sentence. " * 20,
-            "!@#$%^&*()",
-            "   mixed   spaces   ",
-            "ALLCAPS vs lowercase",
-        ]
-
-        successful_cases = 0
-        total_cases = len(edge_cases)
-
-        for i, text in enumerate(edge_cases):
-            try:
-                response = client.post("/evaluate", json={"text": text})
-
-                if response.status_code == 200:
-                    data = response.json()
-                    assert "text" in data
-                    assert "prediction" in data
-                    assert "confidence" in data
-                    assert data["prediction"] in ["positive", "negative"]
-                    assert 0 <= data["confidence"] <= 1
-                    successful_cases += 1
-                elif response.status_code == 400:
-                    # Bad request is acceptable for some edge cases
-                    successful_cases += 1
-
-            except Exception as e:
-                logger.warning(f"Edge case {i+1} failed: {e}")
-
-        success_rate = successful_cases / total_cases
-        logger.info(f"Edge case robustness: {success_rate:.1%}")
-        assert success_rate >= 0.8, f"Edge case handling too poor: {success_rate:.1%}"
+        
+        logger.info("=== Concurrent Requests Test Completed ===")
 
     def test_prediction_consistency(self, client):
-        """Test prediction consistency across multiple calls"""
+        logger.info("=== Starting Prediction Consistency Test ===")
         test_cases = [
             "I absolutely love this product!",
             "This is terrible, worst purchase ever.",
@@ -279,9 +226,8 @@ class TestModelInference:
             predictions = []
             confidences = []
 
-            # Make multiple requests for the same text
             for _ in range(5):
-                response = client.post("/evaluate", json={"text": text})
+                response = client.post("/evaluate?verbose=false", json={"text": text})
                 if response.status_code == 200:
                     data = response.json()
                     predictions.append(data["prediction"])
@@ -295,9 +241,91 @@ class TestModelInference:
                     statistics.variance(confidences) if len(confidences) > 1 else 0
                 )
 
-                logger.info(f"Text: {text[:30]}...")
-                logger.info(f"  Consistent: {prediction_consistent}")
-                logger.info(f"  Confidence variance: {confidence_variance:.6f}")
-
                 assert prediction_consistent, f"Predictions inconsistent for: {text[:30]}"
                 assert confidence_variance < 0.01, f"High confidence variance for: {text[:30]}"
+        
+        logger.info("=== Prediction Consistency Test Completed ===")
+
+    def test_stress(self, client, stress_test_data):
+        logger.info("=== Starting Stress Test ===")
+        if not stress_test_data:
+            pytest.skip("No stress test data available")
+
+        metrics = ModelStressMetrics()
+        total_requests = 1000
+        target_rps = 100
+        duration = total_requests / target_rps
+        test_texts = stress_test_data[:500]
+
+        logger.info(f"Starting stress test: {total_requests} requests at {target_rps} RPS")
+        metrics.start_monitoring()
+
+        def worker_batch(batch_texts):
+            for text in batch_texts:
+                start = time.time()
+                latency, success, prediction, confidence = make_stress_request(client, text)
+                metrics.record_request(latency, success, prediction, confidence)
+                elapsed = time.time() - start
+                sleep_time = max(0, (1.0 / target_rps) - elapsed)
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+
+        batch_size = 50
+        batches = [test_texts[i : i + batch_size] for i in range(0, len(test_texts), batch_size)]
+
+        with ThreadPoolExecutor(max_workers=20) as executor:
+            futures = []
+            for i in range(0, total_requests, batch_size):
+                batch_texts = [
+                    test_texts[j % len(test_texts)]
+                    for j in range(i, min(i + batch_size, total_requests))
+                ]
+                futures.append(executor.submit(worker_batch, batch_texts))
+
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    logger.error(f"Batch execution failed: {e}")
+
+        metrics.end_monitoring()
+        results = metrics.get_comprehensive_metrics()
+
+        logger.info("Stress test results:")
+        logger.info(f"  Total Requests: {results['total_requests']}")
+        logger.info(f"  Successful: {results['successful_requests']}")
+        logger.info(f"  Error Rate: {results['error_rate']:.2%}")
+        logger.info(f"  Throughput: {results['throughput']:.2f} req/s")
+        logger.info(f"  Avg Latency: {results['avg_latency']:.3f}s")
+        logger.info(f"  P50 Latency: {results['p50_latency']:.3f}s")
+        logger.info(f"  P95 Latency: {results['p95_latency']:.3f}s")
+        logger.info(f"  Peak Memory: {results['peak_memory_mb']:.1f} MB")
+        logger.info(f"  Peak CPU: {results['peak_cpu_percent']:.1f}%")
+
+        assert results['error_rate'] < 0.1, f"Error rate too high: {results['error_rate']:.2%}"
+        assert (
+            results['throughput'] > 50.0
+        ), f"Throughput too low: {results['throughput']:.2f} req/s"
+        assert results['p95_latency'] < 2.0, f"P95 latency too high: {results['p95_latency']:.3f}s"
+        
+        logger.info("=== Stress Test Completed ===")
+
+    def test_malformed_input(self, client):
+        logger.info("=== Starting Malformed Input Test ===")
+        test_cases = [
+            {"text": ""},
+            {"text": "   "},
+            {"invalid_field": "test"},
+            {},
+        ]
+
+        for i, test_case in enumerate(test_cases):
+            response = client.post("/evaluate?verbose=false", json=test_case)
+            assert (
+                response.status_code == 422
+            ), f"Test case {i+1} should return 422, got {response.status_code}"
+
+        non_json_response = client.post("/evaluate?verbose=false", data="invalid json")
+        assert non_json_response.status_code == 422, "Non-JSON input should return 422"
+        
+        logger.info("=== Malformed Input Test Completed ===")

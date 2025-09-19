@@ -49,6 +49,10 @@ class TextCleaner:
     def contains_email(text: str) -> bool:
         return bool(TextCleaner._EMAIL_REGEX.search(text))
 
+    @staticmethod
+    def contains_punctuation(text: str) -> bool:
+        return bool(TextCleaner._PUNCTUATION_REGEX.search(text))
+
     @classmethod
     def remove_urls(cls, text: str) -> str:
         return cls._URL_REGEX.sub('', text)
