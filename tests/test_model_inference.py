@@ -5,6 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import psutil
+import pynvml
 import pytest
 import torch
 from fastapi.testclient import TestClient
@@ -22,6 +23,8 @@ class ModelStressMetrics:
         self.latencies = []
         self.memory_usage = []
         self.cpu_usage = []
+        self.gpu_memory_usage = []
+        self.gpu_utilization = []
         self.errors = 0
         self.total_requests = 0
         self.predictions = []
@@ -29,6 +32,7 @@ class ModelStressMetrics:
         self.start_time = None
         self.end_time = None
         self.process = psutil.Process()
+        self.has_gpu = torch.cuda.is_available()
 
     def start_monitoring(self):
         self.start_time = time.time()
@@ -52,7 +56,29 @@ class ModelStressMetrics:
             self.errors += 1
 
         self.memory_usage.append(self.process.memory_info().rss / 1024 / 1024)
-        self.cpu_usage.append(self.process.cpu_percent())
+        self.cpu_usage.append(psutil.cpu_percent())
+
+        if self.has_gpu:
+            try:
+                gpu_memory = torch.cuda.memory_allocated() / 1024 / 1024
+                self.gpu_memory_usage.append(gpu_memory)
+
+                try:
+
+                    if not hasattr(self, '_nvml_initialized'):
+                        pynvml.nvmlInit()
+                        self._nvml_initialized = True
+                        self._gpu_handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+
+                    gpu_util_info = pynvml.nvmlDeviceGetUtilizationRates(self._gpu_handle)
+                    gpu_util = gpu_util_info.gpu
+                    self.gpu_utilization.append(gpu_util)
+                except (ImportError, Exception):
+                    self.gpu_utilization.append(0)
+
+            except Exception:
+                self.gpu_memory_usage.append(0)
+                self.gpu_utilization.append(0)
 
     def get_comprehensive_metrics(self) -> dict:
         if not self.latencies:
@@ -81,6 +107,15 @@ class ModelStressMetrics:
             "peak_memory_mb": max(self.memory_usage) if self.memory_usage else 0,
             "avg_cpu_percent": statistics.mean(self.cpu_usage) if self.cpu_usage else 0,
             "peak_cpu_percent": max(self.cpu_usage) if self.cpu_usage else 0,
+            "avg_gpu_memory_mb": (
+                statistics.mean(self.gpu_memory_usage) if self.gpu_memory_usage else 0
+            ),
+            "peak_gpu_memory_mb": max(self.gpu_memory_usage) if self.gpu_memory_usage else 0,
+            "avg_gpu_utilization": (
+                statistics.mean(self.gpu_utilization) if self.gpu_utilization else 0
+            ),
+            "peak_gpu_utilization": max(self.gpu_utilization) if self.gpu_utilization else 0,
+            "has_gpu": self.has_gpu,
             "avg_confidence": statistics.mean(self.confidences) if self.confidences else 0,
             "prediction_distribution": (
                 {pred: self.predictions.count(pred) for pred in set(self.predictions)}
@@ -142,7 +177,7 @@ class TestModelInference:
 
         except Exception as e:
             pytest.fail(f"Basic inference failed: {e}")
-        
+
         logger.info("=== Basic Inference Test Completed ===")
 
     def test_model_loading(self):
@@ -165,7 +200,7 @@ class TestModelInference:
 
             except Exception as e:
                 pytest.fail(f"Model loading failed on iteration {i+1}: {e}")
-        
+
         logger.info("=== Model Loading Test Completed ===")
 
     def test_concurrent_requests(self, client, stress_test_data):
@@ -208,10 +243,15 @@ class TestModelInference:
         logger.info(f"  Avg Latency: {results['avg_latency']:.3f}s")
         logger.info(f"  P50 Latency: {results['p50_latency']:.3f}s")
         logger.info(f"  P95 Latency: {results['p95_latency']:.3f}s")
+        logger.info(f"  Peak Memory: {results['peak_memory_mb']:.1f} MB")
+        logger.info(f"  Peak CPU: {results['peak_cpu_percent']:.1f}%")
+        if results['has_gpu']:
+            logger.info(f"  Peak GPU Memory: {results['peak_gpu_memory_mb']:.1f} MB")
+            logger.info(f"  Peak GPU Utilization: {results['peak_gpu_utilization']:.1f}%")
 
         assert results['error_rate'] < 0.2, f"Error rate too high: {results['error_rate']:.2%}"
         assert results['throughput'] > 1.0, f"Throughput too low: {results['throughput']:.2f} req/s"
-        
+
         logger.info("=== Concurrent Requests Test Completed ===")
 
     def test_prediction_consistency(self, client):
@@ -243,7 +283,7 @@ class TestModelInference:
 
                 assert prediction_consistent, f"Predictions inconsistent for: {text[:30]}"
                 assert confidence_variance < 0.01, f"High confidence variance for: {text[:30]}"
-        
+
         logger.info("=== Prediction Consistency Test Completed ===")
 
     def test_stress(self, client, stress_test_data):
@@ -301,13 +341,16 @@ class TestModelInference:
         logger.info(f"  P95 Latency: {results['p95_latency']:.3f}s")
         logger.info(f"  Peak Memory: {results['peak_memory_mb']:.1f} MB")
         logger.info(f"  Peak CPU: {results['peak_cpu_percent']:.1f}%")
+        if results['has_gpu']:
+            logger.info(f"  Peak GPU Memory: {results['peak_gpu_memory_mb']:.1f} MB")
+            logger.info(f"  Peak GPU Utilization: {results['peak_gpu_utilization']:.1f}%")
 
         assert results['error_rate'] < 0.1, f"Error rate too high: {results['error_rate']:.2%}"
         assert (
             results['throughput'] > 50.0
         ), f"Throughput too low: {results['throughput']:.2f} req/s"
         assert results['p95_latency'] < 2.0, f"P95 latency too high: {results['p95_latency']:.3f}s"
-        
+
         logger.info("=== Stress Test Completed ===")
 
     def test_malformed_input(self, client):
@@ -327,5 +370,5 @@ class TestModelInference:
 
         non_json_response = client.post("/evaluate?verbose=false", data="invalid json")
         assert non_json_response.status_code == 422, "Non-JSON input should return 422"
-        
+
         logger.info("=== Malformed Input Test Completed ===")
