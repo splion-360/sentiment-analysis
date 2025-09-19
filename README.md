@@ -44,7 +44,7 @@ sh setup.sh  # ./setup.sh
 <br>
 
 ## EDA (Optional)
-The [`eda.ipynb`](./data/eda.ipynb) notebook provides a detailed visualization of the dataset and some statistics through which 
+The [`eda.ipynb`](./data/eda.ipynb) notebook provides a detailed visualization of the dataset and statistics through which 
 some architectural decisions were guided. __HIGHLY RECOMMENDED__ for viewing before proceeding further 
 
 ## Training (Optional)
