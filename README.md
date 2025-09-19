@@ -193,7 +193,7 @@ as a `binary` classification problem
 
 ### Model Architecture
 
-The following results were obtained using a **Transformer** model with the architecture below, trained for **50 epochs** with **batch size 128**:
+The following results were obtained using a **Transformer** model with the architecture below, trained for **20 epochs** with **batch size 128**:
 
 ```
 Transformer(
@@ -230,95 +230,14 @@ Transformer(
 
 | Tokenizer | Accuracy | Precision | Recall | F1 Score |
 |-----------|----------|-----------|--------|----------|
-| **GPT-2** | **0.8384** | **0.8100** | **0.8901** | **0.8482** |
-| **BPE** | 0.8217 | **0.7864** | **0.8901** | **0.8351** |
+| **GPT-2** | **0.8384** | **0.8229** | **0.8681** | **0.8449** |
+| **BPE** | 0.8217 | 0.7980 | 0.8681 | 0.8316 |
 | **Tweet** | 0.8189 | 0.7970 | 0.8626 | 0.8285 |
 
 **Key Findings:**
 - **GPT-2 tokenizer** achieves the best overall performance with highest accuracy (83.01%) and F1 score (83.82%)
 - **BPE tokenizer** shows competitive performance with best precision (80.41%)
 ---
-
-### 1. **BPE Tokenizer** with **Transformer** 
-
-#### Overall Metrics
-
-| Metric | Value |
-|--------|-------|
-| **Accuracy** | 0.8217 |
-| **F1 Score** | 0.8351 |
-| **Precision** | 0.7864 |
-| **Recall** | 0.8901 |
-
-#### Classification Report
-
-| Class | Precision | Recall | F1-Score | Support |
-|-------|-----------|--------|----------|---------|
-| **Negative (0)** | 0.87 | 0.75 | 0.81 | 177 |
-| **Positive (1)** | 0.79 | 0.89 | 0.84 | 182 |
-| | | | | |
-| **Accuracy** | | | 0.82 | 359 |
-
-#### Confusion Matrix
-
-|  | Predicted Negative | Predicted Positive |
-|--|-------------------|-------------------|
-| **Actual Negative** | 133 | 44 |
-| **Actual Positive** | 20 | 162 |
-
-### 2. **GPT-2 Tokenizer** with **Transformer**
-
-#### Overall Metrics
-
-| Metric | Value |
-|--------|-------|
-| **Accuracy** | 0.8384 |
-| **F1 Score** | 0.8482 |
-| **Precision** | 0.8100 |
-| **Recall** | 0.8901 |
-
-#### Classification Report
-
-| Class | Precision | Recall | F1-Score | Support |
-|-------|-----------|--------|----------|---------|
-| **Negative (0)** | 0.87 | 0.79 | 0.83 | 177 |
-| **Positive (1)** | 0.81 | 0.89 | 0.85 | 182 |
-| | | | | |
-| **Accuracy** | | | 0.83 | 359 |
-
-#### Confusion Matrix
-
-|  | Predicted Negative | Predicted Positive |
-|--|-------------------|-------------------|
-| **Actual Negative** | 139 | 38 |
-| **Actual Positive** | 20 | 162 |
-
-### 3. **Tweet Tokenizer** with **Transformer**
-
-#### Overall Metrics
-
-| Metric | Value |
-|--------|-------|
-| **Accuracy** | 0.8189 |
-| **F1 Score** | 0.8285 |
-| **Precision** | 0.7970 |
-| **Recall** | 0.8626 |
-
-#### Classification Report
-
-| Class | Precision | Recall | F1-Score | Support |
-|-------|-----------|--------|----------|---------|
-| **Negative (0)** | 0.85 | 0.77 | 0.81 | 177 |
-| **Positive (1)** | 0.80 | 0.86 | 0.83 | 182 |
-| | | | | |
-| **Accuracy** | | | 0.82 | 359 |
-
-#### Confusion Matrix
-
-|  | Predicted Negative | Predicted Positive |
-|--|-------------------|-------------------|
-| **Actual Negative** | 137 | 40 |
-| **Actual Positive** | 25 | 157 |
 
 
 
