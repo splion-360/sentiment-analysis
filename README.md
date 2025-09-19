@@ -188,6 +188,12 @@ The API returns a structured response with the following fields:
 
 - **`confidence`** (float): Prediction confidence score between 0.0 and 1.0
   - Calculated using `softmax` probabilities from the model output
+
+#### Testing
+To run inference performance tests, navigate to the `root`, 
+```bash
+pytest -s
+```
 <br>
 
 ## Results
