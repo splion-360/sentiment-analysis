@@ -193,7 +193,7 @@ as a `binary` classification problem
 
 ### Model Architecture
 
-The following results were obtained using a **Transformer** model with the architecture below, trained for **10 epochs** with **batch size 128**:
+The following results were obtained using a **Transformer** model with the architecture below, trained for **50 epochs** with **batch size 128**:
 
 ```
 Transformer(
@@ -230,8 +230,8 @@ Transformer(
 
 | Tokenizer | Accuracy | Precision | Recall | F1 Score |
 |-----------|----------|-----------|--------|----------|
-| **GPT-2** | **0.8301** | 0.8103 | **0.8681** | **0.8382** |
-| **BPE** | 0.8217 | **0.8041** | 0.8571 | 0.8298 |
+| **GPT-2** | **0.8384** | **0.8100** | **0.8901** | **0.8482** |
+| **BPE** | 0.8217 | **0.7864** | **0.8901** | **0.8351** |
 | **Tweet** | 0.8189 | 0.7970 | 0.8626 | 0.8285 |
 
 **Key Findings:**
@@ -246,16 +246,16 @@ Transformer(
 | Metric | Value |
 |--------|-------|
 | **Accuracy** | 0.8217 |
-| **F1 Score** | 0.8298 |
-| **Precision** | 0.8041 |
-| **Recall** | 0.8571 |
+| **F1 Score** | 0.8351 |
+| **Precision** | 0.7864 |
+| **Recall** | 0.8901 |
 
 #### Classification Report
 
 | Class | Precision | Recall | F1-Score | Support |
 |-------|-----------|--------|----------|---------|
-| **Negative (0)** | 0.84 | 0.79 | 0.81 | 177 |
-| **Positive (1)** | 0.80 | 0.86 | 0.83 | 182 |
+| **Negative (0)** | 0.87 | 0.75 | 0.81 | 177 |
+| **Positive (1)** | 0.79 | 0.89 | 0.84 | 182 |
 | | | | | |
 | **Accuracy** | | | 0.82 | 359 |
 
@@ -263,8 +263,8 @@ Transformer(
 
 |  | Predicted Negative | Predicted Positive |
 |--|-------------------|-------------------|
-| **Actual Negative** | 139 | 38 |
-| **Actual Positive** | 26 | 156 |
+| **Actual Negative** | 133 | 44 |
+| **Actual Positive** | 20 | 162 |
 
 ### 2. **GPT-2 Tokenizer** with **Transformer**
 
@@ -272,17 +272,17 @@ Transformer(
 
 | Metric | Value |
 |--------|-------|
-| **Accuracy** | 0.8301 |
-| **F1 Score** | 0.8382 |
-| **Precision** | 0.8103 |
-| **Recall** | 0.8681 |
+| **Accuracy** | 0.8384 |
+| **F1 Score** | 0.8482 |
+| **Precision** | 0.8100 |
+| **Recall** | 0.8901 |
 
 #### Classification Report
 
 | Class | Precision | Recall | F1-Score | Support |
 |-------|-----------|--------|----------|---------|
-| **Negative (0)** | 0.85 | 0.79 | 0.82 | 177 |
-| **Positive (1)** | 0.81 | 0.87 | 0.84 | 182 |
+| **Negative (0)** | 0.87 | 0.79 | 0.83 | 177 |
+| **Positive (1)** | 0.81 | 0.89 | 0.85 | 182 |
 | | | | | |
 | **Accuracy** | | | 0.83 | 359 |
 
@@ -290,8 +290,8 @@ Transformer(
 
 |  | Predicted Negative | Predicted Positive |
 |--|-------------------|-------------------|
-| **Actual Negative** | 140 | 37 |
-| **Actual Positive** | 24 | 158 |
+| **Actual Negative** | 139 | 38 |
+| **Actual Positive** | 20 | 162 |
 
 ### 3. **Tweet Tokenizer** with **Transformer**
 

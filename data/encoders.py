@@ -4,7 +4,8 @@ import os
 from abc import ABC, abstractmethod
 from multiprocessing import Pool
 
-from nltk.stem import SnowballStemmer
+import nltk
+from nltk.stem import SnowballStemmer, WordNetLemmatizer
 from nltk.tokenize import TweetTokenizer as NLTKTweetTokenizer
 from nltk.tokenize.treebank import TreebankWordDetokenizer
 from tokenizers import Tokenizer
@@ -20,6 +21,7 @@ from transformers import GPT2TokenizerFast
 from config import MAX_LENGTH, NUM_WORKERS, USE_STEMMING, setup_logger
 
 logger = setup_logger(__name__, "VIOLET")
+nltk.download('wordnet')
 
 
 class BaseTokenizer(ABC):
@@ -124,11 +126,14 @@ class TweetTokenizer(BaseTokenizer):
         self.use_stemming = USE_STEMMING
         if self.use_stemming:
             self.stemmer = SnowballStemmer("english")
+            self.lemmatizer = WordNetLemmatizer()
 
     def tokenize(self, text: str) -> list[str]:
         tokens = self.tokenizer.tokenize(text)
         if self.use_stemming:
+            # Apply stemming first, then lemmatization
             tokens = [self.stemmer.stem(token) for token in tokens]
+            tokens = [self.lemmatizer.lemmatize(token) for token in tokens]
         return tokens
 
     def _tokenize_batch(self, texts_batch):

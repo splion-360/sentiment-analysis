@@ -17,7 +17,7 @@ class TextInput(BaseModel):
 
 
 class PredictionOutput(BaseModel):
-    text: str
+    text: str | None
     prediction: str
     confidence: float
 
@@ -43,6 +43,7 @@ def evaluate(input_data: TextInput) -> PredictionOutput:
         sentiment, confidence, cleaned_text = inference(text)
         logger.info(f"Predicted sentiment: {sentiment.lower()} with confidence: {confidence}")
 
+        logger.info(f"Cleaned Text: {cleaned_text}")
         return PredictionOutput(
             text=cleaned_text, prediction=sentiment.lower(), confidence=confidence
         )

@@ -126,10 +126,17 @@ class Trainer:
         self._setup_tokenizer()
         self._setup_data_and_model()
 
+        self.wandb_run_id = None
         if self.use_wandb:
             wandb.login()
+            if self.resume_path and os.path.exists(self.resume_path):
+                checkpoint = torch.load(self.resume_path, map_location='cpu', weights_only=False)
+                self.wandb_run_id = checkpoint.get('wandb_run_id')
+
             self.run = wandb.init(
                 project=WANDB_PROJECT,
+                id=self.wandb_run_id,
+                resume="allow" if self.wandb_run_id else None,
                 config={
                     "dataset": "Sentiment Analysis (Twitter)",
                     "model": model_name,
@@ -142,6 +149,8 @@ class Trainer:
                 },
                 name=f"Training {model_name} with {tokenizer_name}",
             )
+            self.wandb_run_id = self.run.id
+            logger.info(f"Wandb run ID: {self.wandb_run_id}")
 
     def _setup_tokenizer(self):
         if self.tokenizer_name == "tweet":
@@ -185,7 +194,7 @@ class Trainer:
         if not os.path.exists(checkpoint_path):
             raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
 
-        checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
+        checkpoint = torch.load(checkpoint_path, map_location=DEVICE, weights_only=False)
         self.model.load_state_dict(checkpoint['model_state_dict'])
 
         if optimizer and 'optimizer_state_dict' in checkpoint:
@@ -204,6 +213,11 @@ class Trainer:
             logger.info(f"Using checkpoint tokenizer: {checkpoint_tokenizer}")
             self.tokenizer_name = checkpoint_tokenizer
             self._setup_tokenizer()
+
+        if self.use_wandb:
+            self.wandb_run_id = checkpoint.get('wandb_run_id')
+            if self.wandb_run_id:
+                logger.info(f"Will resume wandb run: {self.wandb_run_id}")
 
         logger.info(f"Resumed from epoch {self.start_epoch}")
         logger.info(f"Best validation loss: {self.best_val_loss:.4f}")
@@ -334,6 +348,7 @@ class Trainer:
             'vocab': self.vocab,
             'tokenizer_name': self.tokenizer_name,
             'model_name': self.model_name,
+            'wandb_run_id': self.wandb_run_id if self.use_wandb else None,
         }
         torch.save(checkpoint, model_path)
 
@@ -449,13 +464,27 @@ def main():
     parser.add_argument("--save_freq", type=int, default=5, help="Save model every N epochs")
     parser.add_argument("--resume", help="Path to checkpoint to resume training from")
     parser.add_argument("--wandb", action="store_true", default=False, help="Use wandb for logging")
+    parser.add_argument(
+        "--model", 
+        type=str, 
+        default=MODEL_NAME, 
+        choices=Trainer.AVAILABLE_MODELS,
+        help="Model architecture to use"
+    )
+    parser.add_argument(
+        "--tokenizer",
+        type=str,
+        default=TOKENIZER,
+        choices=Trainer.AVAILABLE_TOKENIZERS,
+        help="Tokenizer to use"
+    )
     args = parser.parse_args()
 
     set_seed(SEED)
 
     trainer = Trainer(
-        MODEL_NAME,
-        TOKENIZER,
+        args.model,
+        args.tokenizer,
         args.data_path,
         args.save_freq,
         MAX_LENGTH,

@@ -81,19 +81,6 @@ def _initialize_globals():
 def load_model(
     model_path: str, model_name: str, vocab_size: int, device: torch.device, padding_idx: int
 ) -> torch.nn.Module:
-    """
-    Load trained model from checkpoint
-
-    Args:
-        model_path: Path to model checkpoint file
-        model_name: Name of model architecture to instantiate
-        vocab_size: Size of vocabulary for model initialization
-        device: Device to load model onto
-        padding_idx: Padding token index for model initialization
-
-    Returns:
-        model: For inference
-    """
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")
 
@@ -231,7 +218,7 @@ def inference(text: str) -> tuple[str, float]:
 
     set_seed(SEED)
     cleaned_text = TextCleaner.clean_text(text)
-
+    logger.info(cleaned_text)
     encoding = _global_tokenizer.encode(cleaned_text, _global_vocab)
     input_ids = torch.tensor([encoding['input_ids']], dtype=torch.long).to(DEVICE)
     attention_mask = torch.tensor([encoding['attention_mask']], dtype=torch.long).to(DEVICE)

@@ -21,17 +21,17 @@ class TextCleaner:
         r'https?://(?:[-\w.])+(?:[:\d]+)?(?:/(?:[\w/_.])*(?:\?(?:[\w&=%.])*)?(?:#(?:\w)*)?)?'
     )
     MENTION_PATTERN = r"@\w+"
+    HASHTAG_PATTERN = r"#\w+"
     EMAIL_PATTERN = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+    WHITESPACE_PATTERN = r'\s+'
+    PUNCTUATION_PATTERN = f"[{re.escape(string.punctuation)}]"
 
     _URL_REGEX = re.compile(URL_PATTERN, re.IGNORECASE)
     _MENTION_REGEX = re.compile(MENTION_PATTERN)
+    _HASHTAG_REGEX = re.compile(HASHTAG_PATTERN)
     _EMAIL_REGEX = re.compile(EMAIL_PATTERN)
-    _LEADING_NONALNUM_REGEX = re.compile(r'^[^A-Za-z0-9]+')
-    _MULTIPLE_EXCLAMATION_REGEX = re.compile(r'!{2,}')
-    _MULTIPLE_QUESTION_REGEX = re.compile(r'\?{2,}')
-    _PUNCTUATION_REGEX = re.compile(f"[{re.escape(string.punctuation)}]")
-    _WHITESPACE_REGEX = re.compile(r'\s+')
-    _SINGLE_MARK_REGEX = re.compile(r"(^|[^!?])[!?](?![!?])")
+    _PUNCTUATION_REGEX = re.compile(PUNCTUATION_PATTERN)
+    _WHITESPACE_REGEX = re.compile(WHITESPACE_PATTERN)
 
     @staticmethod
     def contains_url(text: str) -> bool:
@@ -42,59 +42,50 @@ class TextCleaner:
         return bool(TextCleaner._MENTION_REGEX.search(text))
 
     @staticmethod
+    def contains_hashtag(text: str) -> bool:
+        return bool(TextCleaner._HASHTAG_REGEX.search(text))
+
+    @staticmethod
     def contains_email(text: str) -> bool:
         return bool(TextCleaner._EMAIL_REGEX.search(text))
 
-    @staticmethod
-    def contains_multiple_marks(text: str) -> bool:
-        return bool(
-            TextCleaner._MULTIPLE_EXCLAMATION_REGEX.search(text)
-            or TextCleaner._MULTIPLE_QUESTION_REGEX.search(text)
-        )
+    @classmethod
+    def remove_urls(cls, text: str) -> str:
+        return cls._URL_REGEX.sub('', text)
 
-    @staticmethod
-    def contains_single_mark(text: str) -> bool:
-        return bool(TextCleaner._SINGLE_MARK_REGEX.search(text))
+    @classmethod
+    def remove_mentions(cls, text: str) -> str:
+        return cls._MENTION_REGEX.sub('', text)
 
-    @staticmethod
-    def remove_urls(text: str) -> str:
-        return TextCleaner._URL_REGEX.sub('', text)
+    @classmethod
+    def remove_hashtags(cls, text: str) -> str:
+        return cls._HASHTAG_REGEX.sub('', text)
 
-    @staticmethod
-    def remove_mentions(text: str) -> str:
-        return TextCleaner._MENTION_REGEX.sub('', text)
+    @classmethod
+    def remove_emails(cls, text: str) -> str:
+        return cls._EMAIL_REGEX.sub('', text)
 
-    @staticmethod
-    def remove_emails(text: str) -> str:
-        return TextCleaner._EMAIL_REGEX.sub('', text)
+    @classmethod
+    def remove_punctuations(cls, text: str) -> str:
+        return cls._PUNCTUATION_REGEX.sub('', text)
 
-    @staticmethod
-    def remove_leading_nonalnum(text: str) -> str:
-        return TextCleaner._LEADING_NONALNUM_REGEX.sub('', text)
-
-    @staticmethod
-    def remove_multiple_marks(text: str) -> str:
-        text = TextCleaner._MULTIPLE_EXCLAMATION_REGEX.sub('!', text)
-        text = TextCleaner._MULTIPLE_QUESTION_REGEX.sub('?', text)
-        return text
-
-    @staticmethod
-    def remove_punctuations(text: str) -> str:
-        return TextCleaner._PUNCTUATION_REGEX.sub('', text)
+    @classmethod
+    def remove_whitespace(cls, text: str) -> str:
+        return cls._WHITESPACE_REGEX.sub(' ', text).strip()
 
     @staticmethod
     def clean_text(text: str) -> str:
         if not text or not isinstance(text, str):
             return ""
 
-        text = TextCleaner._URL_REGEX.sub('', text)
-        text = TextCleaner._MENTION_REGEX.sub('', text)
-        text = TextCleaner._EMAIL_REGEX.sub('', text)
-        text = TextCleaner._LEADING_NONALNUM_REGEX.sub('', text)
-        text = TextCleaner._MULTIPLE_EXCLAMATION_REGEX.sub('!', text)
-        text = TextCleaner._MULTIPLE_QUESTION_REGEX.sub('?', text)
+        text = text.lower()
+        text = TextCleaner.remove_urls(text)
+        text = TextCleaner.remove_mentions(text)
+        text = TextCleaner.remove_hashtags(text)
+        text = TextCleaner.remove_emails(text)
+        text = TextCleaner.remove_punctuations(text)
+        cleaned = TextCleaner.remove_whitespace(text)
 
-        cleaned = TextCleaner._WHITESPACE_REGEX.sub(' ', text).strip()
         return cleaned
 
     @classmethod
