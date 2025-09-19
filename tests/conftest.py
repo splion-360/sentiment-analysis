@@ -3,11 +3,11 @@ import sys
 
 import pytest
 
+from config import setup_logger
+
 project_root = os.path.dirname(os.path.abspath(__file__))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
-
-from config import setup_logger
 
 logger = setup_logger(__name__, "GREEN")
 

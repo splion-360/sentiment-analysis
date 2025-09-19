@@ -218,7 +218,6 @@ def inference(text: str) -> tuple[str, float]:
 
     set_seed(SEED)
     cleaned_text = TextCleaner.clean_text(text)
-    logger.info(cleaned_text)
     encoding = _global_tokenizer.encode(cleaned_text, _global_vocab)
     input_ids = torch.tensor([encoding['input_ids']], dtype=torch.long).to(DEVICE)
     attention_mask = torch.tensor([encoding['attention_mask']], dtype=torch.long).to(DEVICE)

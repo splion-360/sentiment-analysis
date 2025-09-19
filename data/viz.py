@@ -10,7 +10,7 @@ logger = setup_logger(__name__)
 
 def get_histogram(data: np.ndarray, **kwargs):
 
-    if not data:
+    if data is None:
         logger.error("Cannot create histogram from empty array")
         return
 
@@ -159,4 +159,79 @@ def validate_tokenizer(texts, tokenizer_name, tokenizer, vocab):
         'compression_ratio': total_chars/total_tokens if total_tokens > 0 else 0,
         'total_tokens': total_tokens,
         'vocab_size': len(vocab['itos'])
+    }
+
+
+
+def calculate_information_gain(pos_with_feature, pos_total, neg_with_feature, neg_total):
+    """
+    Calculate information gain for a binary feature across sentiment classes.
+    
+    Information Gain = H(S) - H(S|Feature)
+    where H(S) is entropy of sentiment distribution
+    and H(S|Feature) is weighted entropy after splitting by feature
+    """
+    total = pos_total + neg_total
+    if pos_total == 0 or neg_total == 0:
+        base_entropy = 0
+    else:
+        p_pos = pos_total / total
+        p_neg = neg_total / total
+        base_entropy = -p_pos * np.log2(p_pos) - p_neg * np.log2(p_neg)
+ 
+    with_feature = pos_with_feature + neg_with_feature
+    without_feature = total - with_feature
+    
+
+    if with_feature == 0 or pos_with_feature == 0 or neg_with_feature == 0:
+        entropy_with = 0
+    else:
+        p_pos_with = pos_with_feature / with_feature
+        p_neg_with = neg_with_feature / with_feature
+        entropy_with = -p_pos_with * np.log2(p_pos_with) - p_neg_with * np.log2(p_neg_with)
+
+    pos_without_feature = pos_total - pos_with_feature
+    neg_without_feature = neg_total - neg_with_feature
+    
+
+    if without_feature == 0 or pos_without_feature == 0 or neg_without_feature == 0:
+        entropy_without = 0
+    else:
+        p_pos_without = pos_without_feature / without_feature
+        p_neg_without = neg_without_feature / without_feature
+        entropy_without = -p_pos_without * np.log2(p_pos_without) - p_neg_without * np.log2(p_neg_without)
+
+    weighted_entropy = (with_feature / total) * entropy_with + (without_feature / total) * entropy_without
+    information_gain = base_entropy - weighted_entropy
+    
+    return information_gain
+
+
+def analyze_feature_distribution(data, feature_func, feature_name):
+
+    pos_data = data[data['target'] == 4]
+    neg_data = data[data['target'] == 0]
+    
+    pos_with_feature = sum(1 for text in pos_data['text'] if feature_func(text))
+    neg_with_feature = sum(1 for text in neg_data['text'] if feature_func(text))
+    
+    pos_total = len(pos_data) + 1e-07
+    neg_total = len(neg_data) + 1e-07
+    
+    pos_percentage = (pos_with_feature / pos_total) * 100
+    neg_percentage = (neg_with_feature / neg_total) * 100
+    
+    # Calculate information gain
+    info_gain = calculate_information_gain(pos_with_feature, pos_total, neg_with_feature, neg_total)
+    
+
+    return {
+        'feature': feature_name,
+        'pos_with_feature': pos_with_feature,
+        'pos_total': pos_total,
+        'pos_percentage': pos_percentage,
+        'neg_with_feature': neg_with_feature,
+        'neg_total': neg_total,
+        'neg_percentage': neg_percentage,
+        'information_gain': info_gain,
     }
