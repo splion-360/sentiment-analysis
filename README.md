@@ -234,9 +234,6 @@ Transformer(
 | **BPE** | 0.8217 | 0.7980 | 0.8681 | 0.8316 |
 | **Tweet** | 0.8189 | 0.7970 | 0.8626 | 0.8285 |
 
-**Key Findings:**
-- **GPT-2 tokenizer** achieves the best overall performance with highest accuracy (83.01%) and F1 score (83.82%)
-- **BPE tokenizer** shows competitive performance with best precision (80.41%)
 ---
 
 
