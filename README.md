@@ -43,7 +43,7 @@ sh setup.sh  # ./setup.sh
 ```
 <br>
 
-## Training (OPTIONAL)
+## Training (Optional)
 
 This project has a provision for a custom training pipeline with 3 different tokenizers
 
@@ -123,7 +123,7 @@ python training/evaluate.py --model_path training/weights/transformer/bpe/run_12
 
 2. Choose the best performing model based on validation metrics
 ```bash
-cp training/weights/transformer/bpe/run_12345/best_model.pth training/inference/
+cp training/weights/transformer/bpe/run_12345/best_model.pth training/inference/best.pth
 ```
 
 3. **Update Configuration**: Modify `config.py` to point to your deployed model:
@@ -139,7 +139,7 @@ TOKENIZER = "bpe"  # or "gpt2", "tweet"
 
 #### Model Configuration
 NOTE: Before starting the FastAPI server, ensure the model parameters in `config.py` are correctly set:
-
+You can download the pretrained weights from [here](https://drive.google.com/drive/folders/1ckwXgusr7Ygo-BRiie0j6HCV6cC6W69O?usp=sharing) and place it inside `training/inference/`
 #### Start the Server
 From the root, start the server:
 ```bash
