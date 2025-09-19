@@ -39,7 +39,7 @@ TOKENIZER = "bpe"
 
 LEARNING_RATE = 1e-4
 BATCH_SIZE = 128
-NUM_EPOCHS = 50
+NUM_EPOCHS = 20
 TRAIN_SPLIT = 0.99
 DEVICE = torch.device(f'cuda:{0}' if torch.cuda.is_available() else 'cpu')
 WANDB_PROJECT = "sentiment-analysis-improved"

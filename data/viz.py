@@ -109,3 +109,54 @@ def plot_wordclouds(positive_texts: list, negative_texts: list, **kwargs):
             and {len(negative_texts)} negative texts"
     )
     return fig, axes
+
+
+def calculate_oov_rate(texts, tokenizer, vocab):
+    total_tokens = 0
+    oov_tokens = 0
+    
+    for text in texts:
+        tokens = tokenizer.tokenize(text)
+        for token in tokens:
+            total_tokens += 1
+            if token not in vocab['stoi']:
+                oov_tokens += 1
+    return (oov_tokens / total_tokens * 100) if total_tokens > 0 else 0
+
+def validate_tokenizer(texts, tokenizer_name, tokenizer, vocab):
+    logger.info(f"\n=== {tokenizer_name.upper()} TOKENIZER ANALYSIS ===")
+    
+    oov_rate = calculate_oov_rate(texts, tokenizer, vocab)
+    logger.info(f"Out-of-Vocabulary Rate: {oov_rate:.3f}%")
+    
+    patterns = {
+        'URLs': [t for t in texts if 'http' in t.lower()],
+        'Mentions': [t for t in texts if '@' in t],
+        'Hashtags': [t for t in texts if '#' in t],
+        'Misspellings': [t for t in texts if any(word in t.lower() for word in ['sooo', 'loooove', 'hahaha', 'yesss', 'nooo'])],
+        'Emoticons': [t for t in texts if any(emo in t for emo in [':)', ':(', ':D', ':P', '=)'])],
+        'Abbreviations': [t for t in texts if any(abbr in t.upper() for abbr in ['LOL', 'OMG', 'BTW', 'TBH', 'SMH'])]
+    }
+    
+    logger.info(f"\nPattern-specific OOV rates:")
+    for pattern_name, pattern_texts in patterns.items():
+        if pattern_texts:
+            pattern_oov = calculate_oov_rate(pattern_texts[:100], tokenizer, vocab)  # Limit for performance
+            logger.info(f"  {pattern_name}: {pattern_oov:.3f}% (from {len(pattern_texts)} samples)")
+    
+    total_chars = sum(len(text) for text in texts)
+    total_tokens = sum(len(tokenizer.tokenize(text)) for text in texts)
+    chars_per_token = total_chars / total_tokens if total_tokens > 0 else 0
+    
+    logger.info(f"\nEfficiency Metrics:")
+    logger.info(f"  Characters per token: {chars_per_token:.2f}")
+    logger.info(f"  Compression ratio: {total_chars}/{total_tokens} = {total_chars/total_tokens:.2f}")
+    
+    return {
+        'tokenizer': tokenizer_name,
+        'oov_rate': oov_rate,
+        'chars_per_token': chars_per_token,
+        'compression_ratio': total_chars/total_tokens if total_tokens > 0 else 0,
+        'total_tokens': total_tokens,
+        'vocab_size': len(vocab['itos'])
+    }
